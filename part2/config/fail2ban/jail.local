@@ -1,0 +1,48 @@
+# CSC3106 Mini-Project - Part 2 (Group BB)
+# fail2ban policy for web01's SSH service.
+#
+# This is the "prevent" layer of our response to Risk 3 from the Part 1 risk
+# matrix: web01 currently has no working rate limit or lockout, which is the
+# gap that allowed 117 uninterrupted password guesses against `deploy` in 34
+# minutes (part1/output/brute_force_success.csv).
+#
+# Every number below was tested by replaying our assigned extract through
+# part2/simulate_lockout.py before we recommended it. Under this policy:
+#   - all 4 campaign IPs from Part 1 are banned, and no one else is
+#   - 2,510 of 3,724 failed attempts (67%) never reach sshd
+#   - the successful brute-force login to `deploy` at Jul 11 23:47:04 falls
+#     inside a ban window and does not happen
+#   - zero legitimate logins are blocked (every 192.0.2.x admin IP stays
+#     under the trigger threshold; their worst run is 9 failures spread over
+#     more than 10 minutes)
+#
+# Deploy as /etc/fail2ban/jail.local. Requires the standard fail2ban sshd
+# filter, which ships with the package - no custom filter needed for the
+# log lines we observed.
+
+[DEFAULT]
+# Escalate repeat offenders: second ban is 2h, third is 4h, and so on.
+# In the replay this is what kept 203.0.113.77 locked out at the moment it
+# would otherwise have compromised `deploy` (its third ban, 4h, started
+# Jul 11 23:13:45 - 45 seconds into the final burst).
+bantime.increment = true
+bantime           = 1h
+
+# 5 retries in 10 minutes. Part 1 showed legitimate users occasionally fail
+# 5-6 times in total around a successful login, but spread out - no
+# legitimate source IP in our extract ever produced 5 failures inside 10
+# minutes, so this threshold banned no one who wasn't part of the campaign.
+maxretry = 5
+findtime = 10m
+
+# IMPORTANT: before enabling, add the organisation's known admin egress IPs
+# here so an attacker can't lock the admins out of their own box by spraying
+# failures, and so a fat-fingered admin doesn't self-ban. We can't know
+# these from the log extract; whoever deploys this must fill them in.
+# ignoreip = 127.0.0.1/8 <admin-network>
+
+[sshd]
+enabled  = true
+port     = ssh
+logpath  = %(sshd_log)s
+backend  = %(sshd_backend)s
